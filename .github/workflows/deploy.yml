@@ -1,0 +1,52 @@
+name: Deploy
+
+# Continuous deployment to the 14Labs VPS.
+# On every push to master (or a manual run), SSH into the server and redeploy
+# the kharchay service: pull the latest code and rebuild the containers. The
+# web container runs `manage.py migrate` on start, so no separate migrate step.
+#
+# Requires these repo secrets (Settings -> Secrets and variables -> Actions):
+#   VPS_HOST     the VPS public IPv4 address (hosted runners are IPv4-only)
+#   VPS_PORT     SSH port (2222)
+#   VPS_USER     deploy user with docker access + ACL on /opt/services/kharchay
+#   VPS_SSH_KEY  private key whose public half is in the deploy user's authorized_keys
+# See /opt/services/kharchay/DEPLOY.md in the 14labs-infra repo for setup.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd /opt/services/kharchay
+            git -C src fetch --prune origin
+            git -C src reset --hard origin/master
+            docker compose up -d --build web celery-worker
+            docker image prune -f
+            # Wait for the API to report healthy
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8020/api/health/ >/dev/null; then
+                echo "kharchay: healthy"; exit 0
+              fi
+              sleep 5
+            done
+            echo "kharchay: API did not become healthy after deploy" >&2
+            docker compose logs --tail 50 web >&2
+            exit 1
