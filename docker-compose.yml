@@ -63,7 +63,7 @@ services:
     networks: [default]
 
   web:
-    build: ./src
+    build: .
     restart: unless-stopped
     command: >
       sh -c "python manage.py migrate &&
@@ -88,7 +88,7 @@ services:
     networks: [default, services-net]
 
   celery-worker:
-    build: ./src
+    build: .
     restart: unless-stopped
     command: celery -A config worker -l info
     env_file: .env

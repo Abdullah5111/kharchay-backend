@@ -40,8 +40,10 @@ Members record shared spending and daily meal attendance; the app computes **who
 ## Project structure
 
 ```
-src/
+.
 ├── config/            # settings, root urls, celery app, wsgi
+├── manage.py
+├── Dockerfile
 └── apps/
     ├── core/          # health check, shared utilities
     ├── accounts/      # email-OTP auth, JWT, custom user, device tokens
@@ -74,11 +76,10 @@ The API is served on **http://127.0.0.1:8020** (health check: `GET /api/health/`
 The test suite runs against **SQLite** with no external services, so it needs only a virtualenv:
 
 ```bash
-cd src
-python -m venv ../.venv
-../.venv/bin/pip install -r requirements.txt   # Windows: ..\.venv\Scripts\pip
-../.venv/bin/python manage.py migrate
-../.venv/bin/python manage.py runserver 0.0.0.0:8020
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt   # Windows: .venv\Scripts\pip
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py runserver 0.0.0.0:8020
 ```
 
 ### Environment variables
@@ -117,8 +118,7 @@ Notifs      GET /api/notifications · POST /api/notifications/read
 ## Testing
 
 ```bash
-cd src
-../.venv/bin/python -m pytest          # Windows: ..\.venv\Scripts\python -m pytest
+.venv/bin/python -m pytest          # Windows: .venv\Scripts\python -m pytest
 ```
 
 The suite (166 tests) covers auth, permissions, the money invariants (e.g. **settlement nets sum to zero**, splits sum exactly to the amount), the file-upload path, and the status machines.

@@ -1,0 +1,17 @@
+# Keep the build context lean now that the Dockerfile sits at the repo root.
+.git
+.github
+.gitignore
+.dockerignore
+docker-compose.yml
+README.md
+*.md
+.env
+.env.*
+.venv
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache
+db.sqlite3
+media/
