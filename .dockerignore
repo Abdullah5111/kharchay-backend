@@ -15,3 +15,8 @@ README.md
 .pytest_cache
 db.sqlite3
 media/
+# Test + CI files aren't needed in the runtime image.
+**/tests/
+conftest.py
+pytest.ini
+.pytest_cache
