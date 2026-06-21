@@ -32,3 +32,26 @@ def test_verify_otp_bad_code_rejected(api_client):
     resp = api_client.post("/api/auth/verify-otp/",
         {"email": "z@z.com", "code": "999999"}, format="json")
     assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_refresh_token_returns_new_access(api_client):
+    code = otp.issue_otp("r@user.com", "login")
+    tokens = api_client.post("/api/auth/verify-otp/",
+        {"email": "r@user.com", "code": code}, format="json").json()
+    # Exchange the refresh token for a fresh access token
+    resp = api_client.post("/api/auth/refresh/", {"refresh": tokens["refresh"]}, format="json")
+    assert resp.status_code == 200
+    new_access = resp.json()["access"]
+    assert new_access
+    # The new access token authenticates against a protected endpoint
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {new_access}")
+    me = api_client.get("/api/me/")
+    assert me.status_code == 200
+    assert me.json()["email"] == "r@user.com"
+
+
+@pytest.mark.django_db
+def test_refresh_with_bad_token_rejected(api_client):
+    resp = api_client.post("/api/auth/refresh/", {"refresh": "not-a-real-token"}, format="json")
+    assert resp.status_code == 401
