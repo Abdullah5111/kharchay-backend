@@ -17,6 +17,10 @@ class OTPThrottle(ScopedRateThrottle):
     scope = "otp"
 
 
+class OTPVerifyThrottle(ScopedRateThrottle):
+    scope = "otp_verify"
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([OTPThrottle])
@@ -30,6 +34,7 @@ def request_otp(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([OTPVerifyThrottle])
 def verify_otp(request):
     s = VerifyOTPSerializer(data=request.data)
     s.is_valid(raise_exception=True)
