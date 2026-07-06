@@ -47,3 +47,11 @@ def test_reissue_invalidates_previous_code():
     first = otp.issue_otp("re@e.com", "login")
     otp.issue_otp("re@e.com", "login")  # second issue deletes the first unconsumed code
     assert otp.verify_otp("re@e.com", first, "login") is False
+
+@pytest.mark.django_db
+def test_consumed_code_is_single_use():
+    # A code that verified once must never verify again — the consume step
+    # claims the row atomically so a replay (or a concurrent second use) fails.
+    code = otp.issue_otp("once@e.com", "login")
+    assert otp.verify_otp("once@e.com", code, "login") is True
+    assert otp.verify_otp("once@e.com", code, "login") is False
