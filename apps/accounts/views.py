@@ -3,9 +3,9 @@ from rest_framework.decorators import api_view, permission_classes, throttle_cla
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from . import otp
+from .throttling import OTPRequestThrottle, OTPVerifyThrottle, OTPEmailThrottle
 from .serializers import RequestOTPSerializer, VerifyOTPSerializer, UserSerializer, DeviceSerializer
 from .models import DeviceToken
 from .tasks import send_otp_email
@@ -13,17 +13,9 @@ from .tasks import send_otp_email
 User = get_user_model()
 
 
-class OTPThrottle(ScopedRateThrottle):
-    scope = "otp"
-
-
-class OTPVerifyThrottle(ScopedRateThrottle):
-    scope = "otp_verify"
-
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
-@throttle_classes([OTPThrottle])
+@throttle_classes([OTPRequestThrottle, OTPEmailThrottle])
 def request_otp(request):
     s = RequestOTPSerializer(data=request.data)
     s.is_valid(raise_exception=True)
