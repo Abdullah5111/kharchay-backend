@@ -1,7 +1,6 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.db import transaction
 from django.utils import timezone
 
 from apps.social.models import Group, GroupMembership
@@ -165,16 +164,20 @@ def approve_payment(request, payment_id):
     if err is not None:
         return err
 
-    if payment.status != Payment.SUBMITTED:
+    # Atomic state transition: only the request that actually flips
+    # SUBMITTED -> APPROVED wins (rowcount 1). Closes the check-then-act race
+    # where concurrent approve/reject (or a double-approve) both passed a stale
+    # status gate — now only the winner mutates the row and notifies.
+    updated = Payment.objects.filter(pk=payment.pk, status=Payment.SUBMITTED).update(
+        status=Payment.APPROVED,
+        reviewed_by=request.user,
+        reviewed_at=timezone.now(),
+        review_note=request.data.get("review_note", ""),
+    )
+    if not updated:
         return Response({"detail": "Only a submitted payment can be reviewed."}, status=400)
 
-    with transaction.atomic():
-        payment.status = Payment.APPROVED
-        payment.reviewed_by = request.user
-        payment.reviewed_at = timezone.now()
-        payment.review_note = request.data.get("review_note", "")
-        payment.save()
-
+    payment.refresh_from_db()
     notify(
         [payment.user],
         "payment_approved",
@@ -193,16 +196,18 @@ def reject_payment(request, payment_id):
     if err is not None:
         return err
 
-    if payment.status != Payment.SUBMITTED:
+    # Atomic state transition (see approve_payment): only the winning
+    # SUBMITTED -> REJECTED update mutates the row and notifies.
+    updated = Payment.objects.filter(pk=payment.pk, status=Payment.SUBMITTED).update(
+        status=Payment.REJECTED,
+        reviewed_by=request.user,
+        reviewed_at=timezone.now(),
+        review_note=request.data.get("review_note", ""),
+    )
+    if not updated:
         return Response({"detail": "Only a submitted payment can be reviewed."}, status=400)
 
-    with transaction.atomic():
-        payment.status = Payment.REJECTED
-        payment.reviewed_by = request.user
-        payment.reviewed_at = timezone.now()
-        payment.review_note = request.data.get("review_note", "")
-        payment.save()
-
+    payment.refresh_from_db()
     notify(
         [payment.user],
         "payment_rejected",

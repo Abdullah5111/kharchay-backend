@@ -129,6 +129,28 @@ def test_reject_already_rejected_payment_400(api_client):
 
 
 @pytest.mark.django_db
+def test_conflicting_second_decision_loses_and_does_not_double_notify(api_client):
+    """Once approved, a conflicting reject must lose: 400, status stays approved,
+    and no second notification fires — only the winning transition notifies.
+    Guards the atomic conditional-update transition (the true concurrent race
+    is enforced by the single-statement UPDATE, not observable on sqlite)."""
+    owner = User.objects.create_user(email="owner_r@e.com", name="OwnerR")
+    payer = User.objects.create_user(email="payer_r@e.com", name="PayerR")
+    g = make_group(owner, payer)
+    payment = make_payment(g, payer)
+
+    auth(api_client, owner)
+    assert api_client.post(f"/api/payments/{payment.id}/approve/", {}, format="json").status_code == 200
+    r = api_client.post(f"/api/payments/{payment.id}/reject/", {}, format="json")
+    assert r.status_code == 400
+
+    payment.refresh_from_db()
+    assert payment.status == "approved"
+    assert Notification.objects.filter(user=payer, type="payment_approved").count() == 1
+    assert Notification.objects.filter(user=payer, type="payment_rejected").count() == 0
+
+
+@pytest.mark.django_db
 def test_non_admin_member_approve_403(api_client):
     """Non-admin member trying to approve → 403."""
     owner = User.objects.create_user(email="owner5@e.com", name="Owner5")
