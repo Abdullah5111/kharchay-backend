@@ -1,8 +1,9 @@
 name: Deploy
 
-# Continuous deployment to the 14Labs VPS.
-# On every push to master (or a manual run), SSH into the server and redeploy
-# the kharchay service: pull the latest code and rebuild the containers. The
+# CI + continuous deployment to the 14Labs VPS.
+# Every push to master (and every PR) runs the test suite against Postgres +
+# Redis. Only if the tests pass — and only on a push to master — do we SSH into
+# the server and redeploy the kharchay service (pull latest code, rebuild). The
 # web container runs `manage.py migrate` on start, so no separate migrate step.
 #
 # Requires these repo secrets (Settings -> Secrets and variables -> Actions):
@@ -15,6 +16,8 @@ name: Deploy
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 concurrency:
@@ -22,7 +25,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kharchay
+          POSTGRES_PASSWORD: kharchay
+          POSTGRES_DB: kharchay_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kharchay"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # CI-only values. DEBUG=True keeps the prod-only hardening branch off and
+      # uses the local-memory cache (matches how the suite runs locally).
+      SECRET_KEY: ci-only-secret-not-used-in-production-0123456789abcdef
+      DATABASE_URL: postgres://kharchay:kharchay@localhost:5432/kharchay_test
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_TASK_ALWAYS_EAGER: "True"
+      DEBUG: "True"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+      - name: Run tests
+        run: pytest -q
+
   deploy:
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
