@@ -31,9 +31,9 @@ Members record shared spending and daily meal attendance; the app computes **who
 
 - **Python 3.12 · Django 5.0** · **Django REST Framework 3.15** · **SimpleJWT**
 - **PostgreSQL 16** (via `psycopg` 3) · **Redis** + **Celery** (async email/push/settlement)
-- **MinIO / S3** (`boto3`) for payment-proof storage
+- **Payment-proof storage** — Django `FileSystemStorage` under `MEDIA_ROOT`, bind-mounted to the host and served by nginx (see the `14labs-infra` deploy)
 - **Gunicorn**, fully **Dockerized** (`docker compose`)
-- **pytest-django** test suite (**166 tests**)
+- **pytest-django** test suite (**173 tests**)
 
 ---
 
@@ -61,7 +61,7 @@ Members record shared spending and daily meal attendance; the app computes **who
 
 ### Option A — Docker (recommended)
 
-Brings up Postgres, Redis, MinIO, the API, and a Celery worker.
+Brings up Postgres, Redis, the API, and a Celery worker.
 
 ```bash
 cp .env.example .env          # then fill in the secrets (see table below)
@@ -93,7 +93,7 @@ Configured via `django-environ`; see [`.env.example`](.env.example).
 | `ALLOWED_HOSTS` | Comma-separated allowed hostnames. |
 | `DATABASE_URL` | Postgres DSN (`postgres://user:pass@db:5432/name`). |
 | `REDIS_URL` | Redis URL for Celery broker/result backend. |
-| `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_PROOF_BUCKET` | Object storage for payment proofs. |
+| `MEDIA_ROOT` | Filesystem path for payment-proof uploads (bind-mounted to the host; defaults to `BASE_DIR/media`). |
 | `EMAIL_*` / `DEFAULT_FROM_EMAIL` | SMTP settings for OTP delivery (console backend by default in dev). |
 
 ---
@@ -121,7 +121,7 @@ Notifs      GET /api/notifications · POST /api/notifications/read
 .venv/bin/python -m pytest          # Windows: .venv\Scripts\python -m pytest
 ```
 
-The suite (166 tests) covers auth, permissions, the money invariants (e.g. **settlement nets sum to zero**, splits sum exactly to the amount), the file-upload path, and the status machines.
+The suite (173 tests) covers auth, permissions, the money invariants (e.g. **settlement nets sum to zero**, splits sum exactly to the amount), the file-upload path, and the status machines.
 
 ---
 
@@ -135,10 +135,16 @@ For each kitchen pool in a month: `pool_rate = pool_spend / total_attendance_uni
 
 **Feature-complete** across auth → social → ledger → Haazri → settlement → payments.
 
-Open follow-ups before a production deployment:
+Payment-proof images are validated by **magic-byte sniffing** (not just the
+client-supplied content-type) and stored via Django `FileSystemStorage`, served
+by nginx under `/media/` with `X-Content-Type-Options: nosniff` and
+`Content-Disposition: attachment`.
 
-- Swap payment-proof storage from local/dev media to **MinIO/S3 with signed URLs** (or an authenticated download view) and add magic-byte image validation.
-- End-to-end **on-device smoke test** of the full submit → approve → standing loop.
+Optional future hardening (not required for the internal APK build):
+
+- Move payment-proof storage to **S3/MinIO with signed URLs** (or an
+  authenticated download view) if proofs ever need to be private per-user rather
+  than served via unguessable `uuid4` capability links.
 
 ---
 
