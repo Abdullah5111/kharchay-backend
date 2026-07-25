@@ -20,6 +20,18 @@ from .tasks import send_otp_email
 User = get_user_model()
 
 
+def user_has_password(user) -> bool:
+    """Whether the user has a real, usable password.
+
+    ``has_usable_password()`` alone is not enough: users created via
+    ``get_or_create`` (the OTP verify path) get ``password=""``, and Django
+    treats an empty string as *usable* (it only checks the unusable prefix).
+    Guard on a non-empty hash so empty/legacy accounts are correctly reported
+    as password-less.
+    """
+    return bool(user.password) and user.has_usable_password()
+
+
 def _token_response(user, **extra):
     """Issue a fresh JWT pair for ``user`` in the shape the app expects."""
     refresh = RefreshToken.for_user(user)
@@ -57,7 +69,7 @@ def verify_otp(request):
         user.save(update_fields=["email_verified"])
     # has_password tells the app whether to prompt the user to set one after a
     # code login (first-time users and legacy OTP accounts have no usable password).
-    return _token_response(user, is_new=is_new, has_password=user.has_usable_password())
+    return _token_response(user, is_new=is_new, has_password=user_has_password(user))
 
 
 @api_view(["POST"])
@@ -70,7 +82,7 @@ def login(request):
     user = User.objects.filter(email=email).first()
     if user is None or not user.is_active:
         return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
-    if not user.has_usable_password():
+    if not user_has_password(user):
         # Legacy/first-time account: guide the app to the email-code path.
         return Response(
             {"detail": "no_password", "hint": "Set a password via email code first."},
