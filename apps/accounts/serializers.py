@@ -9,6 +9,13 @@ class VerifyOTPSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=6)
     purpose = serializers.ChoiceField(choices=["login", "signup"], default="login")
 
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(trim_whitespace=False)
+
+class SetPasswordSerializer(serializers.Serializer):
+    password = serializers.CharField(min_length=8, trim_whitespace=False)
+
 class UserSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     email = serializers.EmailField(read_only=True)

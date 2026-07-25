@@ -43,6 +43,13 @@ class OTPVerifyThrottle(_TrustedIPThrottle):
     scope = "otp_verify"
 
 
+class LoginThrottle(_TrustedIPThrottle):
+    """Rate-limit password-login attempts per trusted client IP to blunt
+    brute-force guessing."""
+
+    scope = "login"
+
+
 class OTPEmailThrottle(SimpleRateThrottle):
     """Per-email cap on OTP requests — independent of source IP, so rotating
     IPs can't be used to bomb one victim's inbox."""

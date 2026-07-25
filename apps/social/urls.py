@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path("friends/", views.list_friends),
+    path("friends/<uuid:user_id>/", views.unfriend),
     path("friends/requests/", views.send_friend_request),
     path("friends/requests/list/", views.list_friend_requests),
     path("friends/requests/<uuid:pk>/accept/", views.respond_friend_request, {"action": "accept"}),

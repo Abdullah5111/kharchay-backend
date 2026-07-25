@@ -48,3 +48,31 @@ def test_reverse_direction_duplicate_request_returns_400(api_client):
     # b tries to send a request back to a while one already exists -> 400, not 500
     auth(api_client, b)
     assert api_client.post("/api/friends/requests/", {"email": "a@e.com"}, format="json").status_code == 400
+
+
+@pytest.mark.django_db
+def test_unfriend_removes_friendship_both_sides(api_client):
+    a = User.objects.create_user(email="a@e.com", name="A")
+    b = User.objects.create_user(email="b@e.com", name="B")
+    auth(api_client, a)
+    req_id = api_client.post("/api/friends/requests/", {"email": "b@e.com"}, format="json").json()["id"]
+    auth(api_client, b)
+    api_client.post(f"/api/friends/requests/{req_id}/accept/")
+    # a unfriends b
+    auth(api_client, a)
+    assert api_client.delete(f"/api/friends/{b.id}/").status_code == 200
+    assert api_client.get("/api/friends/").json() == []
+    # gone for b too
+    auth(api_client, b)
+    assert api_client.get("/api/friends/").json() == []
+    # unfriending again -> 404 (not friends)
+    auth(api_client, a)
+    assert api_client.delete(f"/api/friends/{b.id}/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_unfriend_when_not_friends_404(api_client):
+    a = User.objects.create_user(email="a@e.com", name="A")
+    b = User.objects.create_user(email="b@e.com", name="B")
+    auth(api_client, a)
+    assert api_client.delete(f"/api/friends/{b.id}/").status_code == 404

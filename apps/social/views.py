@@ -91,6 +91,22 @@ def list_friends(request):
     return Response(UserSerializer(friends, many=True).data)
 
 
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def unfriend(request, user_id):
+    """Dissolve an existing friendship. Hard-deletes the row (consistent with how
+    a rejected request is removed). Group memberships are left untouched, so
+    re-friending is required before the user can be invited to a group again."""
+    target = User.objects.filter(id=user_id).first()
+    if target is None:
+        return Response({"detail": "User not found."}, status=404)
+    f = Friendship.between(request.user, target)
+    if f is None or f.status != Friendship.ACCEPTED:
+        return Response({"detail": "You are not friends with this user."}, status=404)
+    f.delete()
+    return Response({"detail": "unfriended"})
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def groups(request):

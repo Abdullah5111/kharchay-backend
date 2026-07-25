@@ -73,7 +73,7 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    "DEFAULT_THROTTLE_RATES": {"otp": "5/hour", "otp_verify": "15/hour", "otp_email": "5/hour"},
+    "DEFAULT_THROTTLE_RATES": {"otp": "5/hour", "otp_verify": "15/hour", "otp_email": "5/hour", "login": "10/hour"},
 }
 
 SIMPLE_JWT = {
