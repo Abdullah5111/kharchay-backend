@@ -58,7 +58,9 @@ class Expense(models.Model):
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="expenses")
     title = models.CharField(max_length=160, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    paid_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    # paid_by is null when the expense was paid from the group fund (management).
+    paid_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", null=True, blank=True)
+    paid_by_management = models.BooleanField(default=False)
     date = models.DateField()
     split_type = models.CharField(max_length=10, choices=SPLIT, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
@@ -77,3 +79,19 @@ class ExpenseShare(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["expense", "user"], name="uniq_expense_share")]
+
+
+class Contribution(models.Model):
+    """Money a member pays into the group fund (the shared pool the manager
+    spends from via management-paid expenses)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey("social.Group", on_delete=models.CASCADE, related_name="contributions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    note = models.CharField(max_length=160, blank=True)
+    date = models.DateField()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-date", "-created_at")

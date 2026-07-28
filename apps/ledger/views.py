@@ -2,16 +2,21 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.db import transaction, IntegrityError
+from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from apps.accounts.serializers import UserSerializer
 from apps.social.models import Group, GroupMembership
 from apps.social.permissions import is_member, is_group_admin
-from .models import Category, Expense, ExpenseShare, LedgerPeriod
-from .serializers import CategorySerializer, CategoryCreateSerializer, ExpenseCreateSerializer, ExpenseSerializer
+from .models import Category, Contribution, Expense, ExpenseShare, LedgerPeriod
+from .serializers import (
+    CategorySerializer, CategoryCreateSerializer, ExpenseCreateSerializer, ExpenseSerializer,
+    ContributionCreateSerializer, ContributionSerializer,
+)
 from .constants import CATEGORY_KINDS
 from . import splits
 
@@ -76,7 +81,8 @@ def _create_expense(request, g):
     cat = Category.objects.filter(pk=d["category"], group=g, ledger_type=_cat_kind(d["ledger_type"])).first()
     if cat is None:
         return Response({"detail": "Invalid category for this ledger."}, status=400)
-    if str(d["paid_by"]) not in member_ids:
+    management = d.get("paid_by_management", False)
+    if not management and str(d.get("paid_by")) not in member_ids:
         return Response({"detail": "Payer must be an active member."}, status=400)
 
     share_rows = []
@@ -105,7 +111,10 @@ def _create_expense(request, g):
         try:
             exp = Expense.objects.create(
                 group=g, ledger_type=d["ledger_type"], category=cat, title=d["title"],
-                amount=d["amount"], paid_by_id=d["paid_by"], date=d["date"],
+                amount=d["amount"],
+                paid_by_id=(None if management else d["paid_by"]),
+                paid_by_management=management,
+                date=d["date"],
                 split_type=("" if d["ledger_type"] == "kitchen" else d["split_type"]),
                 created_by=request.user,
             )
@@ -286,3 +295,81 @@ def finalize_period(request, pk, ledger, year, month):
             p.finalized_at = timezone.now()
             p.save(update_fields=["status", "finalized_by", "finalized_at"])
     return Response({"detail": "finalized", "year": p.year, "month": p.month, "status": p.status})
+
+
+# ─────────────────────────── Group fund ───────────────────────────
+
+def _load_contribution(cid):
+    return Contribution.objects.select_related("user").get(id=cid)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def contributions(request, pk):
+    g = _group_or_404(request, pk)
+    if g is None:
+        return Response({"detail": "Not found."}, status=404)
+    if request.method == "POST":
+        if not is_group_admin(request.user, g):
+            return Response({"detail": "Only admins can record contributions."}, status=403)
+        s = ContributionCreateSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        if str(d["user"]) not in _active_member_ids(g):
+            return Response({"detail": "Contributor must be an active member."}, status=400)
+        c = Contribution.objects.create(
+            group=g, user_id=d["user"], amount=d["amount"],
+            note=d["note"], date=d["date"], created_by=request.user,
+        )
+        return Response(ContributionSerializer(_load_contribution(c.id)).data, status=201)
+    qs = Contribution.objects.filter(group=g).select_related("user")
+    year, month = request.query_params.get("year"), request.query_params.get("month")
+    if year and month:
+        qs = qs.filter(date__year=int(year), date__month=int(month))
+    return Response(ContributionSerializer(qs, many=True).data)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def contribution_detail(request, pk):
+    c = Contribution.objects.select_related("group").filter(pk=pk).first()
+    if c is None or not is_member(request.user, c.group):
+        return Response({"detail": "Not found."}, status=404)
+    if not is_group_admin(request.user, c.group):
+        return Response({"detail": "Only admins can remove contributions."}, status=403)
+    c.delete()
+    return Response({"detail": "deleted"})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def fund_summary(request, pk):
+    g = _group_or_404(request, pk)
+    if g is None:
+        return Response({"detail": "Not found."}, status=404)
+    year, month = request.query_params.get("year"), request.query_params.get("month")
+    contrib_qs = Contribution.objects.filter(group=g).select_related("user")
+    exp_qs = Expense.objects.filter(group=g, paid_by_management=True).select_related("category")
+    if year and month:
+        contrib_qs = contrib_qs.filter(date__year=int(year), date__month=int(month))
+        exp_qs = exp_qs.filter(date__year=int(year), date__month=int(month))
+    total_contributed = contrib_qs.aggregate(t=Sum("amount"))["t"] or Decimal("0.00")
+    total_spent = exp_qs.aggregate(t=Sum("amount"))["t"] or Decimal("0.00")
+    per_user = {}
+    for c in contrib_qs:
+        uid = str(c.user_id)
+        if uid not in per_user:
+            per_user[uid] = {"user": UserSerializer(c.user).data, "total": Decimal("0.00")}
+        per_user[uid]["total"] += c.amount
+    per_member = [{"user": v["user"], "total": str(v["total"])} for v in per_user.values()]
+    spent = [{
+        "title": e.title or (e.category.name if e.category_id else ""),
+        "amount": str(e.amount), "date": e.date.isoformat(), "ledger_type": e.ledger_type,
+    } for e in exp_qs]
+    return Response({
+        "total_contributed": str(total_contributed),
+        "total_spent": str(total_spent),
+        "balance": str(total_contributed - total_spent),
+        "per_member": per_member,
+        "spent": spent,
+    })

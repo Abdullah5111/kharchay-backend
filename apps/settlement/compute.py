@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
 
-from apps.ledger.models import Category, Expense, ExpenseShare
+from apps.ledger.models import Category, Contribution, Expense, ExpenseShare
 from apps.haazri.models import MealEvent, MealAttendance, ExtraAmount
 from .money import quantize, apportion
 
@@ -27,11 +27,14 @@ def compute_settlement(group, year, month):
                 .select_related("paid_by", "category")
                 .prefetch_related("shares__user"))
     for e in expenses:
-        pid = remember(e.paid_by)
-        paid[pid] += e.amount
-        bd[pid]["paid"].append({
-            "label": e.title or e.category.name, "ledger_type": e.ledger_type, "amount": e.amount,
-        })
+        # Management-paid expenses come from the group fund, so no member is
+        # credited on the paid side — but the owed split still applies.
+        if not e.paid_by_management and e.paid_by_id:
+            pid = remember(e.paid_by)
+            paid[pid] += e.amount
+            bd[pid]["paid"].append({
+                "label": e.title or e.category.name, "ledger_type": e.ledger_type, "amount": e.amount,
+            })
         if e.ledger_type in NON_KITCHEN:
             for s in e.shares.all():
                 uid = remember(s.user)
@@ -98,6 +101,16 @@ def compute_settlement(group, year, month):
                     "pool_name": ev.category.name, "date": ev.date.isoformat(),
                     "title": ex.title, "amount": amt,
                 })
+
+    # --- Group fund contributions: money members paid into the pool (PAID side) ---
+    for c in (Contribution.objects
+              .filter(group=group, date__year=year, date__month=month)
+              .select_related("user")):
+        uid = remember(c.user)
+        paid[uid] += c.amount
+        bd[uid]["paid"].append({
+            "label": c.note or "Fund contribution", "ledger_type": "contribution", "amount": c.amount,
+        })
 
     lines = {}
     for uid, u in users.items():
